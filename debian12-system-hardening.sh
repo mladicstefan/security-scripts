@@ -69,7 +69,7 @@ echo "Hardening Debian 13 for user: $USERNAME"
 
 apt update && apt upgrade -y
 
-apt install -y ufw fail2ban unattended-upgrades apparmor apparmor-profiles apparmor-utils auditd audispd-plugins aide mailutils
+apt install -y ufw fail2ban unattended-upgrades apparmor apparmor-profiles apparmor-utils auditd audispd-plugins aide aide-common mailutils
 
 # === UFW Firewall ===
 ufw default deny incoming
@@ -427,30 +427,73 @@ dpkg-reconfigure -plow unattended-upgrades
 # This provides defense against MITRE T1565.001 (Stored Data Manipulation) and 
 # T1556 (Modify Authentication Process) by detecting file integrity violations.
 
-# Create aide.conf.d directory if it doesn't exist
+# Verify /etc/aide/aide.conf exists (should be installed by aide-common package)
+if [ ! -f /etc/aide/aide.conf ]; then
+    echo "WARNING: /etc/aide/aide.conf not found. Creating basic configuration..."
+    
+    cat > /etc/aide/aide.conf << 'EOF'
+# AIDE configuration file
+
+# Database and config locations
+database_in=file:/var/lib/aide/aide.db
+database_out=file:/var/lib/aide/aide.db.new
+database_new=file:/var/lib/aide/aide.db.new
+gzip_dbout=yes
+
+# Report settings
+report_url=stdout
+report_detailed_init=yes
+
+# Define attribute groups
+Binlib = p+i+n+u+g+s+b+m+c+md5+sha256
+ConfFiles = p+i+n+u+g+s+b+m+c+md5+sha256
+Logs = p+i+n+u+g+S
+Devices = p+i+n+u+g+s+b+c+md5+sha256
+Databases = p+n+u+g+i+md5+sha256
+
+# Full = all attributes + all hashes
+Full = p+i+n+u+g+s+b+m+c+md5+sha256+rmd160+tiger
+
+# Include additional configuration from aide.conf.d directory
+@@x_include /etc/aide/aide.conf.d ^[a-zA-Z0-9_-]+$
+EOF
+    echo "Basic aide.conf created"
+fi
+
+# Create custom monitoring rules
 mkdir -p /etc/aide/aide.conf.d
 
 cat > /etc/aide/aide.conf.d/99-custom-rules << 'EOF'
-# Monitor web server content for unauthorized modifications
-!/var/www$ VarDir
-/var/www R+a+sha256
+# Custom security monitoring rules
 
-# Monitor systemd service files for persistence mechanisms
-/etc/systemd/system R+a+sha256
-/usr/lib/systemd/system R+a+sha256
+# Monitor web server content for unauthorized modifications
+# Ignore /var/www itself (directory metadata changes frequently)
+!/var/www$
+/var/www Full
+
+# Monitor systemd service files for persistence mechanisms (T1543.002)
+/etc/systemd/system Full
+/usr/lib/systemd/system Full
 
 # Monitor cron for scheduled task persistence (T1053)
-/etc/cron.d R+a+sha256
-/etc/cron.daily R+a+sha256
-/etc/cron.hourly R+a+sha256
-/etc/cron.monthly R+a+sha256
-/etc/cron.weekly R+a+sha256
-/var/spool/cron R+a+sha256
+/etc/cron.d Full
+/etc/cron.daily Full
+/etc/cron.hourly Full
+/etc/cron.monthly Full
+/etc/cron.weekly Full
+/var/spool/cron Full
 EOF
 
 echo "Initializing AIDE database (this may take several minutes)..."
-aideinit
-mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+if aideinit; then
+    mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    echo "AIDE database initialized successfully"
+else
+    AIDE_EXIT=$?
+    echo "WARNING: AIDE initialization failed with exit code $AIDE_EXIT"
+    echo "Check /var/log/aide/aide.log for details"
+    echo "You can manually initialize AIDE later with: sudo aideinit"
+fi
 
 # Schedule daily AIDE integrity checks
 cat > /etc/cron.daily/aide-check << 'EOF'
