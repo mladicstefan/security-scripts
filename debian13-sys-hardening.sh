@@ -198,9 +198,9 @@ echo "which can still fill the connection table. For production environments und
 echo "active attack, implement connection rate limiting with iptables/nftables."
 echo ""
 cat > /etc/sysctl.d/99-security-hardening.conf << 'EOF'
-# Prevents this system from routing packets between interfaces (not a router)
-net.ipv4.ip_forward = 0
-net.ipv6.conf.all.forwarding = 0
+# Critical: Proxmox Hypervisor must forward traffic for VMs.
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
 
 # Enable SYN cookies to protect against SYN flood DoS attacks
 # NOTE: SYN cookies can still be exploited by nmap SYN scans to fill connection tables.
@@ -224,11 +224,14 @@ net.ipv6.conf.all.accept_source_route = 0
 net.ipv6.conf.default.accept_source_route = 0
 
 # Reject ICMP redirects (prevents MITM attacks via route manipulation)
-net.ipv4.conf.all.accept_redirects = 0
+# Set to 0 on non-bridge interfaces, but be careful with global 'all' and PVE's vmbr0.
+# Safest: Keep redirects enabled only for the host's primary, non-bridge interfaces
+# For a PVE host, setting 'all' to 0 is generally too aggressive and causes issues.
+net.ipv4.conf.all.accept_redirects = 1
 net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.all.secure_redirects = 1
 net.ipv4.conf.default.secure_redirects = 0
-net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 1
 net.ipv6.conf.default.accept_redirects = 0
 
 # Do not send ICMP redirects (we are not a router)
@@ -358,10 +361,13 @@ cat > /etc/audit/rules.d/hardening.rules << 'EOF'
 -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -k delete
 -a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -k delete
 
-# Make audit configuration immutable (requires reboot to modify)
-# This prevents even root from disabling auditing or modifying rules at runtime
-# Provides defense against anti-forensics techniques (T1070)
--e 2
+# Make audit configuration mutable for operational agility (change from -e 2)
+# This allows 'auditctl -D' to function and rules to be reloaded without a reboot.
+# Use '-e 1' (enable) for high-security, but avoid '-e 2' until all services are stable.
+# -e 2: Immutable (requires reboot for any change) - too aggressive for this phase.
+# -e 1: Enabled (mutable)
+# -e 0: Disabled
+-e 1
 EOF
 
 systemctl restart auditd
