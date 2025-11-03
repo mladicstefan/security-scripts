@@ -69,31 +69,10 @@ echo "Hardening Debian 13 for user: $USERNAME"
 
 apt update && apt upgrade -y
 
-apt install -y ufw fail2ban unattended-upgrades apparmor apparmor-profiles apparmor-utils auditd audispd-plugins aide aide-common mailutils
+apt install -y fail2ban unattended-upgrades apparmor apparmor-profiles apparmor-utils auditd audispd-plugins aide aide-common mailutils
+# UFW REMOVED because I got a deditcated firewall :)
+# If u wanna set it up, check ufw docs 
 
-# === UFW Firewall ===
-ufw default deny incoming
-
-echo ""
-echo "OUTBOUND TRAFFIC: Currently allows all outgoing connections"
-echo "For high-security environments, consider whitelisting only required ports:"
-echo "  ufw default deny outgoing"
-echo "  ufw allow out 53/udp    # DNS (vulnerable to DNS spoofing - consider DNSSEC)"
-echo "  ufw allow out 80/tcp    # HTTP"
-echo "  ufw allow out 443/tcp   # HTTPS"
-echo "  ufw allow out 123/udp   # NTP"
-echo ""
-# OUTBOUND TRAFFIC: Currently allows all outgoing connections
-# For high-security environments, consider whitelisting only required ports:
-#   ufw default deny outgoing
-#   ufw allow out 53/udp    # DNS (vulnerable to DNS spoofing - consider DNSSEC)
-#   ufw allow out 80/tcp    # HTTP
-#   ufw allow out 443/tcp   # HTTPS
-#   ufw allow out 123/udp   # NTP
-ufw default allow outgoing
-
-ufw allow 22/tcp
-ufw --force enable
 
 # === SSH Hardening ===
 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
@@ -109,7 +88,6 @@ ClientAliveCountMax 2
 Protocol 2
 HostbasedAuthentication no
 IgnoreRhosts yes
-AllowUsers $USERNAME
 EOF
 
 if sshd -t; then
@@ -129,10 +107,10 @@ echo 'GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT apparmor=1 securit
 update-grub
 
 if [ -f /etc/apparmor.d/sbin.dhclient ]; then
-    aa-enforce /etc/apparmor.d/sbin.dhclient
+    aa-complain /etc/apparmor.d/sbin.dhclient
 fi
 if [ -f /etc/apparmor.d/usr.sbin.tcpdump ]; then
-    aa-enforce /etc/apparmor.d/usr.sbin.tcpdump
+    aa-complain /etc/apparmor.d/usr.sbin.tcpdump
 fi
 
 # === AppArmor Nginx Profile ===
@@ -555,11 +533,11 @@ echo "REBOOT REQUIRED for all changes to take effect"
 echo ""
 echo "Status:"
 echo "  - SSH: Password auth enabled for $USERNAME"
+echo "  - If you want to do key only, set that up."
 echo "  - Root login: Disabled (locked)"
-echo "  - UFW: Enabled (port 22 allowed)"
-echo "  - Fail2ban: Active"
+echo "  - Fail2ban: Active & Strict"
 echo "  - AppArmor: Enabled (reboot required)"
-echo "  - Auditd: Running with immutable rules (-e 2)"
+echo "  - Auditd: Running with mutable rules (-e 1)"
 echo "  - AIDE: Initialized with daily checks"
 echo "  - Log rotation: Configured"
 echo "  - Unattended-upgrades: Configured"
@@ -569,15 +547,8 @@ echo "Nginx profile enforced if nginx is installed."
 echo "Test your applications, then enforce with:"
 echo "  sudo aa-enforce /etc/apparmor.d/PROFILE"
 echo ""
-echo "For web servers, add UFW rules:"
-echo "  sudo ufw allow 80/tcp"
-echo "  sudo ufw allow 443/tcp"
-echo ""
-echo "For Samba file sharing, add UFW rules:"
-echo "  sudo ufw allow 137,138/udp"
-echo "  sudo ufw allow 139,445/tcp"
-echo ""
-echo "IMPORTANT: Audit rules are now IMMUTABLE (-e 2)"
+echo "IMPORTANT: Audit rules are now MUTABLE (-e 1)"
+echo "To set them to mutable do -e 2 and then to revert do:"
 echo "To modify audit rules after reboot, you must:"
 echo "  1. Reboot into single-user mode, OR"
 echo "  2. Remove -e 2 from /etc/audit/rules.d/hardening.rules"
